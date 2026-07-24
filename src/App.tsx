@@ -9,6 +9,7 @@ import { CircuitDiagram } from "./ui/CircuitDiagram";
 import { CodeEditor } from "./ui/CodeEditor";
 import { ExamplePicker } from "./ui/ExamplePicker";
 import { ExperimentStage } from "./ui/ExperimentStage";
+import { conditionLabel } from "./ui/format";
 import { useExperimentPlayer } from "./ui/useExperimentPlayer";
 
 const INITIAL_EXAMPLE = EXAMPLES[1]!;
@@ -20,6 +21,7 @@ function App() {
   const [activeExampleId, setActiveExampleId] = useState<string | null>(INITIAL_EXAMPLE.id);
   const [seed, setSeed] = useState(1);
   const [totalRounds, setTotalRounds] = useState(3000);
+  const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
 
   const evaluation = useMemo(() => {
     try {
@@ -36,6 +38,11 @@ function App() {
 
   const player = useExperimentPlayer(evaluation.ok ? evaluation.compiled : null, seed, totalRounds);
   const { hits, revealed, total } = player;
+
+  const histograms = evaluation.ok ? evaluation.result.histograms : [];
+  const safeFocusedIndex =
+    focusedIndex !== null && focusedIndex < histograms.length ? focusedIndex : null;
+  const focusedHistogram = safeFocusedIndex !== null ? histograms[safeFocusedIndex] : undefined;
 
   return (
     <div className="app">
@@ -138,11 +145,21 @@ function App() {
             onTogglePlay={player.togglePlaying}
             onStep={player.step}
             onSpeedChange={player.setSpeed}
+            focusConditions={focusedHistogram ? focusedHistogram.instruction.conditions : null}
+            focusLabel={focusedHistogram ? conditionLabel(focusedHistogram.instruction) : "all rounds"}
+            onClearFocus={() => setFocusedIndex(null)}
           />
 
           {evaluation.ok ? (
             evaluation.result.histograms.map((h, i) => (
-              <AnalyzePanel key={i} histogram={h} hits={hits} revealed={revealed} />
+              <AnalyzePanel
+                key={i}
+                histogram={h}
+                hits={hits}
+                revealed={revealed}
+                focused={safeFocusedIndex === i}
+                onClick={() => setFocusedIndex(safeFocusedIndex === i ? null : i)}
+              />
             ))
           ) : (
             <div className="panel panel--error-full">

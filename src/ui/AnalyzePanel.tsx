@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { AnalyzeInstruction, HistogramResult, Hit } from "../core/types";
+import { conditionLabel } from "./format";
 import { SCREEN_Y_RANGE } from "./useExperimentPlayer";
 
 interface AnalyzePanelProps {
   readonly histogram: HistogramResult;
   readonly hits: readonly Hit[];
   readonly revealed: number;
+  readonly focused: boolean;
+  readonly onClick: () => void;
 }
 
 const NUM_COLS = 64;
@@ -13,19 +16,11 @@ const CANVAS_W = 560;
 const CANVAS_H = 168;
 const POINT_PX = 3;
 
-function conditionLabel(instr: AnalyzeInstruction): string {
-  if (instr.conditions.length === 0) return `HIST(${instr.leg})`;
-  const conds = instr.conditions
-    .map((c) => `${c.leg}=${c.outcome > 0 ? "+1" : "-1"}`)
-    .join(", ");
-  return `HIST(${instr.leg} | ${conds})`;
-}
-
 function matchesConditions(hit: Hit, instr: AnalyzeInstruction): boolean {
   return instr.conditions.every((c) => hit.legOutcomes[c.leg] === c.outcome);
 }
 
-export function AnalyzePanel({ histogram, hits, revealed }: AnalyzePanelProps) {
+export function AnalyzePanel({ histogram, hits, revealed, focused, onClick }: AnalyzePanelProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const filteredHits = useMemo(
@@ -115,12 +110,23 @@ export function AnalyzePanel({ histogram, hits, revealed }: AnalyzePanelProps) {
   }, [histogram, columnCounts]);
 
   return (
-    <div className="analyze-panel">
+    <div
+      className={focused ? "analyze-panel analyze-panel--focused" : "analyze-panel"}
+      onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") onClick();
+      }}
+    >
       <div className="analyze-panel__header">
         <span className="analyze-panel__expr">{conditionLabel(histogram.instruction)}</span>
         {histogram.instruction.comment && (
           <span className="analyze-panel__comment">// {histogram.instruction.comment}</span>
         )}
+        <span className="analyze-panel__hint">
+          {focused ? "● showing in apparatus" : "click to view in apparatus"}
+        </span>
       </div>
       <canvas ref={canvasRef} className="analyze-panel__canvas" />
       <div className="analyze-panel__readout">

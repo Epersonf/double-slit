@@ -1,3 +1,13 @@
+import type { AnalyzeInstruction } from "../core/types";
+
+export function conditionLabel(instr: AnalyzeInstruction): string {
+  if (instr.conditions.length === 0) return `HIST(${instr.leg})`;
+  const conds = instr.conditions
+    .map((c) => `${c.leg}=${c.outcome > 0 ? "+1" : "-1"}`)
+    .join(", ");
+  return `HIST(${instr.leg} | ${conds})`;
+}
+
 export function formatTheta(theta: number): string {
   const overPi = theta / Math.PI;
   if (Math.abs(theta) < 1e-9) return "0";

@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { slitPositions } from "../core/physics";
 import { comboProfileForHit } from "../core/simulate";
 import type { CompiledProgram } from "../core/simulate";
-import type { Hit } from "../core/types";
+import type { Condition, Hit } from "../core/types";
 import { formatTheta } from "./format";
 import { SCREEN_Y_RANGE } from "./useExperimentPlayer";
 
@@ -19,6 +19,12 @@ interface ExperimentStageProps {
   readonly onTogglePlay: () => void;
   readonly onStep: () => void;
   readonly onSpeedChange: (speed: number) => void;
+  /** When set (by clicking an ANALYZE panel), only rounds matching these
+   * conditions are animated/landed — the same underlying stream, filtered down
+   * to one screen's worth of rounds instead of the marginal mixture. */
+  readonly focusConditions: readonly Condition[] | null;
+  readonly focusLabel: string;
+  readonly onClearFocus: () => void;
 }
 
 const STAGE_W = 960;
@@ -31,7 +37,8 @@ const CENTER_Y = STAGE_H / 2;
 const HALF_SPAN = STAGE_H / 2 - 30;
 const NUM_SCREEN_BINS = 52;
 const FLIGHT_DURATION_BASE = 900;
-const PARTNER_FLASH_AT = 0.25;
+const FLASH_AT_BEFORE = 0.18;
+const FLASH_AT_AFTER = 0.94;
 const PARTNER_FLASH_MS = 260;
 const MAX_SPAWNS_PER_FRAME = 40;
 
@@ -48,6 +55,11 @@ function flightDuration(speed: number): number {
   return Math.max(260, FLIGHT_DURATION_BASE - speed * 50);
 }
 
+function matchesFocus(hit: Hit, focus: readonly Condition[] | null): boolean {
+  if (!focus) return true;
+  return focus.every((c) => hit.legOutcomes[c.leg] === c.outcome);
+}
+
 interface Flight {
   readonly hit: Hit;
   readonly start: number;
@@ -55,12 +67,17 @@ interface Flight {
   readonly slitProbabilities: readonly number[];
   readonly distinguishability: number;
   readonly dominantSlit: number;
-  partnerFlashed: boolean;
+  readonly flashedLegs: Set<string>;
 }
 
 interface AnalyzerBox {
   readonly legName: string;
   readonly basisLabel: string;
+  /** Flight progress (0..1) at which this leg's measurement is revealed —
+   * "before" fires early (near the source), "after" fires near the screen,
+   * visualizing that the choice/order doesn't change the statistics. */
+  readonly flashAtProgress: number;
+  readonly timingLabel: string;
   readonly x: number;
   readonly y: number;
   plusCount: number;
@@ -82,9 +99,15 @@ function makeStageState(compiled: CompiledProgram | null): StageState {
         .filter((idx) => compiled.legWithMeas.has(idx))
         .map((idx, i) => {
           const meas = compiled.legWithMeas.get(idx);
+          // Only "after" gets a distinct (late) flash timing and an explicit
+          // label — an unspecified `time=` isn't the same as the program
+          // asserting "before", so it must not be displayed as if it were.
+          const timing = meas?.timing;
           return {
             legName: compiled.legNames[idx] ?? `leg${idx + 1}`,
             basisLabel: meas ? formatTheta(meas.basisTheta) : "?",
+            flashAtProgress: timing === "after" ? FLASH_AT_AFTER : FLASH_AT_BEFORE,
+            timingLabel: timing ?? "",
             x: SOURCE_X + 90 + i * 110,
             y: STAGE_H - 30,
             plusCount: 0,
@@ -115,7 +138,7 @@ function spawn(st: StageState, hit: Hit, compiled: CompiledProgram, now: number,
     slitProbabilities: profile.slitProbabilities,
     distinguishability: profile.distinguishability,
     dominantSlit,
-    partnerFlashed: false,
+    flashedLegs: new Set(),
   });
 }
 
@@ -127,11 +150,11 @@ function landOn(st: StageState, f: Flight): void {
 }
 
 function maybeFlashPartner(st: StageState, f: Flight, progress: number, now: number): void {
-  if (f.partnerFlashed || progress < PARTNER_FLASH_AT) return;
-  f.partnerFlashed = true;
   for (const box of st.boxes) {
+    if (f.flashedLegs.has(box.legName) || progress < box.flashAtProgress) continue;
     const outcome = f.hit.legOutcomes[box.legName];
     if (outcome === undefined) continue;
+    f.flashedLegs.add(box.legName);
     if (outcome === 1) box.plusCount++;
     else box.minusCount++;
     box.flashUntil = now + PARTNER_FLASH_MS;
@@ -334,7 +357,8 @@ function draw(
     ctx.textAlign = "center";
     ctx.font = "9.5px monospace";
     ctx.fillStyle = flashing ? color : "rgba(127,184,255,0.85)";
-    ctx.fillText(`${box.legName} θ=${box.basisLabel}`, box.x, box.y - 3);
+    const timingSuffix = box.timingLabel ? ` (${box.timingLabel})` : "";
+    ctx.fillText(`${box.legName} θ=${box.basisLabel}${timingSuffix}`, box.x, box.y - 3);
     ctx.fillStyle = "rgba(201,255,216,0.55)";
     ctx.fillText(`+${box.plusCount} / -${box.minusCount}`, box.x, box.y + 10);
     ctx.textAlign = "left";
@@ -356,12 +380,16 @@ export function ExperimentStage({
   onTogglePlay,
   onStep,
   onSpeedChange,
+  focusConditions,
+  focusLabel,
+  onClearFocus,
 }: ExperimentStageProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const stateRef = useRef<StageState>(makeStageState(compiled));
   const hitsRef = useRef(hits);
   const revealedRef = useRef(revealed);
   const speedRef = useRef(speed);
+  const focusRef = useRef(focusConditions);
   useEffect(() => {
     speedRef.current = speed;
   }, [speed]);
@@ -371,9 +399,14 @@ export function ExperimentStage({
   useEffect(() => {
     hitsRef.current = hits;
   }, [hits]);
+  useEffect(() => {
+    focusRef.current = focusConditions;
+  }, [focusConditions]);
 
   // Reset the stage whenever the underlying hit batch changes (new program,
   // seed, or round count) — matches the reset useExperimentPlayer itself does.
+  // Switching focus does NOT resample anything, just changes which of the same
+  // rounds get animated, so it intentionally does not reset spawned/landed.
   useEffect(() => {
     stateRef.current = makeStageState(compiled);
   }, [compiled, hits]);
@@ -396,20 +429,24 @@ export function ExperimentStage({
     const tick = (now: number): void => {
       const st = stateRef.current;
       const currentHits = hitsRef.current;
+      const focus = focusRef.current;
       const targetRevealed = Math.min(revealedRef.current, currentHits.length);
 
       if (compiled) {
+        // Non-matching rounds (filtered out by focus) are skipped for free —
+        // only actual spawns count against the per-frame budget, so a
+        // restrictive focus still catches up instantly instead of visibly
+        // lagging behind the shared round counter.
         let spawnBudget = MAX_SPAWNS_PER_FRAME;
         while (st.spawned < targetRevealed && spawnBudget > 0) {
           const hit = currentHits[st.spawned];
           if (!hit) break;
-          spawn(st, hit, compiled, now, flightDuration(speedRef.current));
+          if (matchesFocus(hit, focus)) {
+            spawn(st, hit, compiled, now, flightDuration(speedRef.current));
+            spawnBudget--;
+          }
           st.spawned++;
-          spawnBudget--;
         }
-        // A big jump (e.g. dragging speed way up, or "restart") can leave a
-        // backlog; skip straight to it rather than visibly catching up forever.
-        if (st.spawned < targetRevealed) st.spawned = targetRevealed;
       }
 
       const stillActive: Flight[] = [];
@@ -442,6 +479,14 @@ export function ExperimentStage({
           round: <b>{revealed}</b> / {total}
         </span>
       </div>
+      <div className="stage__focus">
+        showing: <b>{focusLabel}</b>
+        {focusConditions !== null && (
+          <button type="button" className="stage__focus-clear" onClick={onClearFocus}>
+            ✕ show all rounds
+          </button>
+        )}
+      </div>
       <canvas ref={canvasRef} className="stage__canvas" />
       <div className="stage__controls">
         <button type="button" className="stage__btn" onClick={onTogglePlay}>
@@ -455,7 +500,7 @@ export function ExperimentStage({
           <input
             type="range"
             min={0.5}
-            max={12}
+            max={500}
             step={0.5}
             value={speed}
             onChange={(e) => onSpeedChange(Number(e.target.value))}
@@ -464,10 +509,11 @@ export function ExperimentStage({
         </label>
       </div>
       <p className="stage__caption">
-        The entangled partner is measured first (flash at its analyzer). If that
-        reveals which slit the signal took, it lands as a particle through a single
-        slit; if the information is erased, it travels as an interfering wave
-        through both.
+        The entangled partner is measured first (flash at its analyzer — "before"
+        fires near the source, "after" fires near the screen). If that reveals
+        which slit the signal took, it lands as a particle through a single slit;
+        if the information is erased, it travels as an interfering wave through
+        both. Click any ANALYZE panel below to watch just that subset land here.
       </p>
     </div>
   );

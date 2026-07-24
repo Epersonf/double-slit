@@ -75,4 +75,28 @@ ANALYZE: HIST(leg1)
 ANALYZE: HIST(leg1 | leg2=+1)
 ANALYZE: HIST(leg1 | leg2=-1)`,
   },
+  {
+    id: "all-particle",
+    title: "extra — every round is a particle (basis=0)",
+    description:
+      "Full which-path information: every single round in the apparatus renders as a particle through one slit, never a wave.",
+    source: `SRC(s1): type=photon x2, state=Bell(Phi+)
+leg1: PATH(slits=2, spacing=40, width=10)
+leg2: MEAS(basis=0)
+ANALYZE: HIST(leg1)
+ANALYZE: HIST(leg1 | leg2=+1)
+ANALYZE: HIST(leg1 | leg2=-1)`,
+  },
+  {
+    id: "delayed-choice-before",
+    title: "extra — measure before it arrives (time=before)",
+    description:
+      "The partner is measured (and which-path revealed) before the signal even reaches the screen — still no fringe, even conditioned. Watch the analyzer flash near the source instead of near the screen.",
+    source: `SRC(s1): type=photon x2, state=Bell(Phi+)
+leg1: PATH(slits=2, spacing=40, width=10)
+leg2: MEAS(basis=0, time=before)
+ANALYZE: HIST(leg1)
+ANALYZE: HIST(leg1 | leg2=+1)
+ANALYZE: HIST(leg1 | leg2=-1)`,
+  },
 ];
