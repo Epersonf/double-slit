@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { AnalyzeInstruction, HistogramResult, Hit } from "../core/types";
-import { BUILDUP_Y_RANGE } from "./useBuildup";
+import { SCREEN_Y_RANGE } from "./useExperimentPlayer";
 
 interface AnalyzePanelProps {
   readonly histogram: HistogramResult;
@@ -35,7 +35,7 @@ export function AnalyzePanel({ histogram, hits, revealed }: AnalyzePanelProps) {
 
   const columnCounts = useMemo(() => {
     const counts = new Array<number>(NUM_COLS).fill(0);
-    const { min, max } = BUILDUP_Y_RANGE;
+    const { min, max } = SCREEN_Y_RANGE;
     for (const hit of filteredHits) {
       const t = (hit.screenY - min) / (max - min);
       const col = Math.min(NUM_COLS - 1, Math.max(0, Math.floor(t * NUM_COLS)));
@@ -58,7 +58,7 @@ export function AnalyzePanel({ histogram, hits, revealed }: AnalyzePanelProps) {
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
 
-    const { min: yMin, max: yMax } = BUILDUP_Y_RANGE;
+    const { min: yMin, max: yMax } = SCREEN_Y_RANGE;
 
     // baseline + y=0 tick
     ctx.strokeStyle = "rgba(57,255,136,0.18)";

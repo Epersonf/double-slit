@@ -4,7 +4,7 @@ import { comboProfileForHit } from "../core/simulate";
 import type { CompiledProgram } from "../core/simulate";
 import type { Hit } from "../core/types";
 import { formatTheta } from "./format";
-import { BUILDUP_Y_RANGE } from "./useBuildup";
+import { SCREEN_Y_RANGE } from "./useBuildup";
 
 interface ExperimentStageProps {
   readonly compiled: CompiledProgram | null;
@@ -25,7 +25,7 @@ const PARTNER_FLASH_AT = 0.25;
 const PARTNER_FLASH_MS = 260;
 
 function mapY(physicsY: number): number {
-  const { max } = BUILDUP_Y_RANGE;
+  const { max } = SCREEN_Y_RANGE;
   return CENTER_Y - (physicsY / max) * HALF_SPAN;
 }
 
@@ -111,7 +111,7 @@ function spawn(st: StageState, hit: Hit, compiled: CompiledProgram, now: number,
 }
 
 function landOn(st: StageState, f: Flight): void {
-  const { min, max } = BUILDUP_Y_RANGE;
+  const { min, max } = SCREEN_Y_RANGE;
   const t = (f.hit.screenY - min) / (max - min);
   const bin = Math.min(NUM_SCREEN_BINS - 1, Math.max(0, Math.floor(t * NUM_SCREEN_BINS)));
   st.landedCounts[bin] = (st.landedCounts[bin] ?? 0) + 1;
