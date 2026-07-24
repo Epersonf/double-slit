@@ -248,6 +248,30 @@
   color: var(--ink-dim);
 }
 
+.rounds__total {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--ink-dim);
+  letter-spacing: 0.06em;
+}
+
+.rounds__total input[type="number"] {
+  width: 90px;
+  border: 1px solid var(--border);
+  background: #030503;
+  color: var(--ink-bright);
+  padding: 4px 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.rounds__total input[type="number"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .rounds__restart {
   border: 1px solid var(--border);
   color: var(--ink);

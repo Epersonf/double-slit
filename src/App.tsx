@@ -9,14 +9,17 @@ import { CircuitDiagram } from "./ui/CircuitDiagram";
 import { CodeEditor } from "./ui/CodeEditor";
 import { ExamplePicker } from "./ui/ExamplePicker";
 import { ExperimentStage } from "./ui/ExperimentStage";
-import { useBuildup } from "./ui/useBuildup";
+import { useExperimentPlayer } from "./ui/useExperimentPlayer";
 
 const INITIAL_EXAMPLE = EXAMPLES[1]!;
+const MIN_ROUNDS = 100;
+const MAX_ROUNDS = 20000;
 
 function App() {
   const [source, setSource] = useState(INITIAL_EXAMPLE.source);
   const [activeExampleId, setActiveExampleId] = useState<string | null>(INITIAL_EXAMPLE.id);
   const [seed, setSeed] = useState(1);
+  const [totalRounds, setTotalRounds] = useState(3000);
 
   const evaluation = useMemo(() => {
     try {
@@ -31,7 +34,8 @@ function App() {
     }
   }, [source]);
 
-  const { hits, revealed, total } = useBuildup(evaluation.ok ? evaluation.compiled : null, seed);
+  const player = useExperimentPlayer(evaluation.ok ? evaluation.compiled : null, seed, totalRounds);
+  const { hits, revealed, total } = player;
 
   return (
     <div className="app">
@@ -91,8 +95,25 @@ function App() {
                 />
               </div>
               <div className="rounds__readout">
-                {revealed} / {total} rounds · seed #{seed}
+                {revealed} / {total} rounds · seed #{seed} · {player.speed.toFixed(1)}/s
+                {player.playing ? "" : " · paused"}
               </div>
+              <label className="rounds__total">
+                TOTAL ROUNDS
+                <input
+                  type="number"
+                  min={MIN_ROUNDS}
+                  max={MAX_ROUNDS}
+                  step={100}
+                  value={totalRounds}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (Number.isFinite(v)) {
+                      setTotalRounds(Math.min(MAX_ROUNDS, Math.max(MIN_ROUNDS, Math.round(v))));
+                    }
+                  }}
+                />
+              </label>
               <button type="button" className="rounds__restart" onClick={() => setSeed((s) => s + 1)}>
                 ▶ RESTART SIMULATION
               </button>
@@ -108,7 +129,16 @@ function App() {
         </section>
 
         <section className="column column--right">
-          <ExperimentStage compiled={evaluation.ok ? evaluation.compiled : null} hits={hits} />
+          <ExperimentStage
+            compiled={evaluation.ok ? evaluation.compiled : null}
+            hits={hits}
+            revealed={revealed}
+            speed={player.speed}
+            playing={player.playing}
+            onTogglePlay={player.togglePlaying}
+            onStep={player.step}
+            onSpeedChange={player.setSpeed}
+          />
 
           {evaluation.ok ? (
             evaluation.result.histograms.map((h, i) => (

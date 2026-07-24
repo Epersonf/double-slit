@@ -1,14 +1,24 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { slitPositions } from "../core/physics";
 import { comboProfileForHit } from "../core/simulate";
 import type { CompiledProgram } from "../core/simulate";
 import type { Hit } from "../core/types";
 import { formatTheta } from "./format";
-import { SCREEN_Y_RANGE } from "./useBuildup";
+import { SCREEN_Y_RANGE } from "./useExperimentPlayer";
 
 interface ExperimentStageProps {
   readonly compiled: CompiledProgram | null;
   readonly hits: readonly Hit[];
+  /** How many of `hits` are "live" — the single shared clock (useExperimentPlayer)
+   * that also drives the ROUNDS panel and every ANALYZE panel's buildup. The stage
+   * never paces itself independently: it only animates whichever hits just became
+   * revealed, so it can never drift out of sync with the rest of the app. */
+  readonly revealed: number;
+  readonly speed: number;
+  readonly playing: boolean;
+  readonly onTogglePlay: () => void;
+  readonly onStep: () => void;
+  readonly onSpeedChange: (speed: number) => void;
 }
 
 const STAGE_W = 960;
@@ -23,6 +33,7 @@ const NUM_SCREEN_BINS = 52;
 const FLIGHT_DURATION_BASE = 900;
 const PARTNER_FLASH_AT = 0.25;
 const PARTNER_FLASH_MS = 260;
+const MAX_SPAWNS_PER_FRAME = 40;
 
 function mapY(physicsY: number): number {
   const { max } = SCREEN_Y_RANGE;
@@ -60,8 +71,7 @@ interface AnalyzerBox {
 
 interface StageState {
   flights: Flight[];
-  emitted: number;
-  lastSpawn: number;
+  spawned: number;
   landedCounts: number[];
   boxes: AnalyzerBox[];
 }
@@ -86,8 +96,7 @@ function makeStageState(compiled: CompiledProgram | null): StageState {
     : [];
   return {
     flights: [],
-    emitted: 0,
-    lastSpawn: performance.now(),
+    spawned: 0,
     landedCounts: new Array(NUM_SCREEN_BINS).fill(0),
     boxes,
   };
@@ -151,13 +160,20 @@ function drawParticle(
     y = lerp(slitY, mapY(f.hit.screenY), t);
   }
   ctx.globalAlpha = Math.min(1, alpha);
+  ctx.shadowColor = "#39ff88";
+  ctx.shadowBlur = 6;
   ctx.fillStyle = "#39ff88";
   ctx.beginPath();
-  ctx.arc(x, y, 3.2, 0, Math.PI * 2);
+  ctx.arc(x, y, 3.4, 0, Math.PI * 2);
   ctx.fill();
+  ctx.shadowBlur = 0;
   ctx.globalAlpha = 1;
 }
 
+/** Wave rendering is the whole point of this stage — it must read clearly even at
+ * a glance. Glow (shadowBlur) + two trailing wavefronts per slit + a bright,
+ * slowly-fading pulse (instead of fading in step with 1-t2) keep it legible the
+ * entire flight instead of only in a brief window right after the barrier. */
 function drawWave(
   ctx: CanvasRenderingContext2D,
   f: Flight,
@@ -167,44 +183,60 @@ function drawWave(
   const waviness = 1 - f.distinguishability;
   if (waviness < 0.03) return;
 
+  ctx.shadowColor = "#39ff88";
+
   if (progress <= P_BARRIER) {
     const t = progress / P_BARRIER;
     const x = lerp(SOURCE_X, BARRIER_X, t);
-    ctx.globalAlpha = waviness * 0.9;
-    ctx.fillStyle = "#39ff88";
+    const pulse = 3 + Math.sin(t * Math.PI * 3) * 1.5;
+    ctx.globalAlpha = waviness;
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = "#8dffb8";
     ctx.beginPath();
-    ctx.arc(x, CENTER_Y, 3, 0, Math.PI * 2);
+    ctx.arc(x, CENTER_Y, Math.max(2, pulse), 0, Math.PI * 2);
     ctx.fill();
+    ctx.shadowBlur = 0;
     ctx.globalAlpha = 1;
     return;
   }
 
   const t2 = (progress - P_BARRIER) / (1 - P_BARRIER);
   const maxRadius = (SCREEN_X - BARRIER_X) * 0.95;
+  const fade = Math.max(0, 1 - t2 * 0.75);
 
   slitYs.forEach((slitY, j) => {
     const weight = f.slitProbabilities[j] ?? 0;
     if (weight < 0.02) return;
-    const radius = Math.max(2, t2 * maxRadius);
-    const rippleOpacity = waviness * weight * (1 - t2) * 1.6;
-    if (rippleOpacity <= 0.02) return;
-    ctx.globalAlpha = Math.min(1, rippleOpacity);
-    ctx.strokeStyle = "#39ff88";
-    ctx.lineWidth = 1.4;
-    ctx.beginPath();
-    ctx.arc(BARRIER_X, slitY, radius, -0.95, 0.95);
-    ctx.stroke();
+    const leadRadius = Math.max(2, t2 * maxRadius);
+    const rings = [
+      { radius: leadRadius, opacity: 1 },
+      { radius: Math.max(2, leadRadius - 22), opacity: 0.55 },
+    ];
+    for (const ring of rings) {
+      const rippleOpacity = waviness * weight * fade * ring.opacity * 2.2;
+      if (rippleOpacity <= 0.03) continue;
+      ctx.globalAlpha = Math.min(1, rippleOpacity);
+      ctx.shadowBlur = 8;
+      ctx.strokeStyle = "#39ff88";
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.arc(BARRIER_X, slitY, ring.radius, -1.05, 1.05);
+      ctx.stroke();
+    }
   });
+  ctx.shadowBlur = 0;
 
-  const landOpacity = waviness * Math.max(0, (t2 - 0.55) / 0.45);
+  const landOpacity = waviness * Math.max(0, (t2 - 0.5) / 0.5);
   if (landOpacity > 0.03) {
     const x = lerp(BARRIER_X, SCREEN_X, t2);
     const y = lerp(CENTER_Y, mapY(f.hit.screenY), t2);
     ctx.globalAlpha = Math.min(1, landOpacity);
-    ctx.fillStyle = "#39ff88";
+    ctx.shadowBlur = 8;
+    ctx.fillStyle = "#8dffb8";
     ctx.beginPath();
-    ctx.arc(x, y, 3, 0, Math.PI * 2);
+    ctx.arc(x, y, 3.2, 0, Math.PI * 2);
     ctx.fill();
+    ctx.shadowBlur = 0;
   }
   ctx.globalAlpha = 1;
 }
@@ -315,34 +347,42 @@ function draw(
   }
 }
 
-export function ExperimentStage({ compiled, hits }: ExperimentStageProps) {
+export function ExperimentStage({
+  compiled,
+  hits,
+  revealed,
+  speed,
+  playing,
+  onTogglePlay,
+  onStep,
+  onSpeedChange,
+}: ExperimentStageProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [speed, setSpeed] = useState(3);
-  const [playing, setPlaying] = useState(true);
-  const [launched, setLaunched] = useState(0);
-
+  const stateRef = useRef<StageState>(makeStageState(compiled));
+  const hitsRef = useRef(hits);
+  const revealedRef = useRef(revealed);
   const speedRef = useRef(speed);
   useEffect(() => {
     speedRef.current = speed;
   }, [speed]);
-  const playingRef = useRef(playing);
   useEffect(() => {
-    playingRef.current = playing;
-  }, [playing]);
+    revealedRef.current = revealed;
+  }, [revealed]);
+  useEffect(() => {
+    hitsRef.current = hits;
+  }, [hits]);
 
-  const stateRef = useRef<StageState>(makeStageState(compiled));
+  // Reset the stage whenever the underlying hit batch changes (new program,
+  // seed, or round count) — matches the reset useExperimentPlayer itself does.
+  useEffect(() => {
+    stateRef.current = makeStageState(compiled);
+  }, [compiled, hits]);
 
-  // Resetting stateRef here (inside the effect) is fine — it's the setState
-  // call that must not happen synchronously in an effect body. The `launched`
-  // readout is instead corrected from inside the rAF callback below (frame 0),
-  // which is an async callback, not the effect body itself.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return undefined;
     const ctx = canvas.getContext("2d");
     if (!ctx) return undefined;
-
-    stateRef.current = makeStageState(compiled);
 
     const dpr = window.devicePixelRatio || 1;
     canvas.width = STAGE_W * dpr;
@@ -352,18 +392,24 @@ export function ExperimentStage({ compiled, hits }: ExperimentStageProps) {
     ctx.scale(dpr, dpr);
 
     let raf = 0;
-    let frame = 0;
 
     const tick = (now: number): void => {
       const st = stateRef.current;
+      const currentHits = hitsRef.current;
+      const targetRevealed = Math.min(revealedRef.current, currentHits.length);
 
-      if (playingRef.current && compiled) {
-        const interval = 1000 / Math.max(0.1, speedRef.current);
-        while (now - st.lastSpawn >= interval && st.emitted < hits.length) {
-          spawn(st, hits[st.emitted]!, compiled, now, flightDuration(speedRef.current));
-          st.emitted++;
-          st.lastSpawn += interval;
+      if (compiled) {
+        let spawnBudget = MAX_SPAWNS_PER_FRAME;
+        while (st.spawned < targetRevealed && spawnBudget > 0) {
+          const hit = currentHits[st.spawned];
+          if (!hit) break;
+          spawn(st, hit, compiled, now, flightDuration(speedRef.current));
+          st.spawned++;
+          spawnBudget--;
         }
+        // A big jump (e.g. dragging speed way up, or "restart") can leave a
+        // backlog; skip straight to it rather than visibly catching up forever.
+        if (st.spawned < targetRevealed) st.spawned = targetRevealed;
       }
 
       const stillActive: Flight[] = [];
@@ -380,14 +426,11 @@ export function ExperimentStage({ compiled, hits }: ExperimentStageProps) {
 
       draw(ctx, st, compiled, now);
 
-      if (frame === 0 || frame % 6 === 0) setLaunched(st.emitted);
-      frame++;
-
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [compiled, hits]);
+  }, [compiled]);
 
   const total = hits.length;
 
@@ -396,28 +439,15 @@ export function ExperimentStage({ compiled, hits }: ExperimentStageProps) {
       <div className="stage__header">
         <span className="stage__title">EXPERIMENT — live apparatus</span>
         <span className="stage__count">
-          launched: <b>{launched}</b> / {total}
+          round: <b>{revealed}</b> / {total}
         </span>
       </div>
       <canvas ref={canvasRef} className="stage__canvas" />
       <div className="stage__controls">
-        <button type="button" className="stage__btn" onClick={() => setPlaying((p) => !p)}>
+        <button type="button" className="stage__btn" onClick={onTogglePlay}>
           {playing ? "❚❚ PAUSE" : "▶ PLAY"}
         </button>
-        <button
-          type="button"
-          className="stage__btn"
-          onClick={() => {
-            const st = stateRef.current;
-            if (compiled && st.emitted < hits.length) {
-              const now = performance.now();
-              spawn(st, hits[st.emitted]!, compiled, now, flightDuration(speed));
-              st.emitted++;
-              st.lastSpawn = now;
-              setLaunched(st.emitted);
-            }
-          }}
-        >
+        <button type="button" className="stage__btn" onClick={onStep}>
           ⇥ STEP
         </button>
         <label className="stage__speed">
@@ -428,7 +458,7 @@ export function ExperimentStage({ compiled, hits }: ExperimentStageProps) {
             max={12}
             step={0.5}
             value={speed}
-            onChange={(e) => setSpeed(Number(e.target.value))}
+            onChange={(e) => onSpeedChange(Number(e.target.value))}
           />
           <span>{speed.toFixed(1)}/s</span>
         </label>
