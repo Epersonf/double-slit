@@ -1,0 +1,98 @@
+:root {
+  --bg: #050806;
+  --bg-panel: #0a0f0b;
+  --ink: #c9ffd8;
+  --ink-dim: #5f8f6d;
+  --ink-bright: #eafff0;
+  --accent: #39ff88;
+  --accent-dim: #1f7a45;
+  --amber: #ffb02e;
+  --red: #ff4d4d;
+  --border: #2a4a34;
+  --border-bright: #39ff88;
+
+  --mono: "JetBrains Mono", "Fira Code", "Cascadia Mono", "SFMono-Regular", Consolas,
+    "Liberation Mono", Menlo, monospace;
+
+  color-scheme: dark;
+  color: var(--ink);
+  background: var(--bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+}
+
+body {
+  font-family: var(--mono);
+  font-size: 14px;
+  line-height: 1.5;
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      rgba(57, 255, 136, 0.025) 0px,
+      rgba(57, 255, 136, 0.025) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+}
+
+#root {
+  min-height: 100svh;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-bright);
+}
+
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: transparent;
+}
+
+button {
+  cursor: pointer;
+}
+
+::selection {
+  background: var(--accent);
+  color: #001a08;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-panel);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border: 1px solid var(--bg-panel);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-dim);
+}
