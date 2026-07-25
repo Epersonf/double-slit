@@ -142,10 +142,14 @@ function spawn(st: StageState, hit: Hit, compiled: CompiledProgram, now: number,
   });
 }
 
-function landOn(st: StageState, f: Flight): void {
+function binIndexForY(screenY: number): number {
   const { min, max } = SCREEN_Y_RANGE;
-  const t = (f.hit.screenY - min) / (max - min);
-  const bin = Math.min(NUM_SCREEN_BINS - 1, Math.max(0, Math.floor(t * NUM_SCREEN_BINS)));
+  const t = (screenY - min) / (max - min);
+  return Math.min(NUM_SCREEN_BINS - 1, Math.max(0, Math.floor(t * NUM_SCREEN_BINS)));
+}
+
+function landOn(st: StageState, f: Flight): void {
+  const bin = binIndexForY(f.hit.screenY);
   st.landedCounts[bin] = (st.landedCounts[bin] ?? 0) + 1;
 }
 
@@ -405,11 +409,39 @@ export function ExperimentStage({
 
   // Reset the stage whenever the underlying hit batch changes (new program,
   // seed, or round count) — matches the reset useExperimentPlayer itself does.
-  // Switching focus does NOT resample anything, just changes which of the same
-  // rounds get animated, so it intentionally does not reset spawned/landed.
   useEffect(() => {
     stateRef.current = makeStageState(compiled);
   }, [compiled, hits]);
+
+  // Switching focus doesn't resample anything, just changes which of the same
+  // rounds count as "on screen". The rounds already spawned before the switch
+  // were binned/counted under the OLD focus (or skipped entirely if they didn't
+  // match it), so the landing histogram and analyzer box tallies must be rebuilt
+  // from scratch against the NEW focus — otherwise the stage keeps showing
+  // whatever the previously-selected histogram had accumulated.
+  useEffect(() => {
+    const st = stateRef.current;
+    const currentHits = hitsRef.current;
+    st.flights = [];
+    st.landedCounts = new Array(NUM_SCREEN_BINS).fill(0);
+    for (const box of st.boxes) {
+      box.plusCount = 0;
+      box.minusCount = 0;
+      box.flashUntil = 0;
+    }
+    for (let i = 0; i < st.spawned && i < currentHits.length; i++) {
+      const hit = currentHits[i];
+      if (!hit || !matchesFocus(hit, focusConditions)) continue;
+      const bin = binIndexForY(hit.screenY);
+      st.landedCounts[bin] = (st.landedCounts[bin] ?? 0) + 1;
+      for (const box of st.boxes) {
+        const outcome = hit.legOutcomes[box.legName];
+        if (outcome === undefined) continue;
+        if (outcome === 1) box.plusCount++;
+        else box.minusCount++;
+      }
+    }
+  }, [focusConditions]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
